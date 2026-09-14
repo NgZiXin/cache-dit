@@ -1,3 +1,4 @@
+import contextlib
 import inspect
 import logging
 import torch
@@ -72,6 +73,17 @@ class CachedBlocks_Pattern_Base(torch.nn.Module):
             f"{self.cache_prefix}, cache_context: {self.cache_context}, "
             f"context_manager: {self.context_manager.name}."
         )
+
+    @contextlib.contextmanager
+    def _nvtx_range(self, name: str):
+        if torch.cuda.is_available():
+            torch.cuda.nvtx.range_push(name)
+            try:
+                yield
+            finally:
+                torch.cuda.nvtx.range_pop()
+        else:
+            yield
 
     def _check_forward_pattern(self):
         if not self.check_forward_pattern:
@@ -259,102 +271,105 @@ class CachedBlocks_Pattern_Base(torch.nn.Module):
 
         self.context_manager.mark_step_begin()
         # Residual L1 diff or Hidden States L1 diff
-        can_use_cache = self.context_manager.can_cache(
-            (
-                Fn_hidden_states_residual
-                if not self.context_manager.is_l1_diff_enabled()
-                else hidden_states
-            ),
-            parallelized=self._is_parallelized(),
-            prefix=(
-                f"{self.cache_prefix}_Fn_residual"
-                if not self.context_manager.is_l1_diff_enabled()
-                else f"{self.cache_prefix}_Fn_hidden_states"
-            ),
-        )
+        with self._nvtx_range("cache_dit:can_cache"):
+            can_use_cache = self.context_manager.can_cache(
+                (
+                    Fn_hidden_states_residual
+                    if not self.context_manager.is_l1_diff_enabled()
+                    else hidden_states
+                ),
+                parallelized=self._is_parallelized(),
+                prefix=(
+                    f"{self.cache_prefix}_Fn_residual"
+                    if not self.context_manager.is_l1_diff_enabled()
+                    else f"{self.cache_prefix}_Fn_hidden_states"
+                ),
+            )
 
         torch._dynamo.graph_break()
         if can_use_cache:
-            self.context_manager.add_cached_step()
-            del Fn_hidden_states_residual
-            hidden_states, encoder_hidden_states = self.context_manager.apply_cache(
-                hidden_states,
-                encoder_hidden_states,
-                prefix=(
-                    f"{self.cache_prefix}_Bn_residual"
-                    if self.context_manager.is_cache_residual()
-                    else f"{self.cache_prefix}_Bn_hidden_states"
-                ),
-                encoder_prefix=(
-                    f"{self.cache_prefix}_Bn_residual"
-                    if self.context_manager.is_encoder_cache_residual()
-                    else f"{self.cache_prefix}_Bn_hidden_states"
-                ),
-            )
-            torch._dynamo.graph_break()
-            # Call last `n` blocks to further process the hidden states
-            # for higher precision.
-            hidden_states, encoder_hidden_states = self.call_Bn_blocks(
-                hidden_states,
-                encoder_hidden_states,
-                *args,
-                **kwargs,
-            )
-        else:
-            self.context_manager.set_Fn_buffer(
-                Fn_hidden_states_residual,
-                prefix=f"{self.cache_prefix}_Fn_residual",
-            )
-            if self.context_manager.is_l1_diff_enabled():
-                # for hidden states L1 diff
-                self.context_manager.set_Fn_buffer(
+            with self._nvtx_range("cache_dit:cache_hit"):
+                self.context_manager.add_cached_step()
+                del Fn_hidden_states_residual
+                hidden_states, encoder_hidden_states = self.context_manager.apply_cache(
                     hidden_states,
-                    f"{self.cache_prefix}_Fn_hidden_states",
-                )
-            del Fn_hidden_states_residual
-            torch._dynamo.graph_break()
-            (
-                hidden_states,
-                encoder_hidden_states,
-                hidden_states_residual,
-                encoder_hidden_states_residual,
-            ) = self.call_Mn_blocks(  # middle
-                hidden_states,
-                encoder_hidden_states,
-                *args,
-                **kwargs,
-            )
-            torch._dynamo.graph_break()
-            if self.context_manager.is_cache_residual():
-                self.context_manager.set_Bn_buffer(
-                    hidden_states_residual,
-                    prefix=f"{self.cache_prefix}_Bn_residual",
-                )
-            else:
-                self.context_manager.set_Bn_buffer(
-                    hidden_states,
-                    prefix=f"{self.cache_prefix}_Bn_hidden_states",
-                )
-
-            if self.context_manager.is_encoder_cache_residual():
-                self.context_manager.set_Bn_encoder_buffer(
-                    encoder_hidden_states_residual,
-                    prefix=f"{self.cache_prefix}_Bn_residual",
-                )
-            else:
-                self.context_manager.set_Bn_encoder_buffer(
                     encoder_hidden_states,
-                    prefix=f"{self.cache_prefix}_Bn_hidden_states",
+                    prefix=(
+                        f"{self.cache_prefix}_Bn_residual"
+                        if self.context_manager.is_cache_residual()
+                        else f"{self.cache_prefix}_Bn_hidden_states"
+                    ),
+                    encoder_prefix=(
+                        f"{self.cache_prefix}_Bn_residual"
+                        if self.context_manager.is_encoder_cache_residual()
+                        else f"{self.cache_prefix}_Bn_hidden_states"
+                    ),
                 )
-            torch._dynamo.graph_break()
-            # Call last `n` blocks to further process the hidden states
-            # for higher precision.
-            hidden_states, encoder_hidden_states = self.call_Bn_blocks(
-                hidden_states,
-                encoder_hidden_states,
-                *args,
-                **kwargs,
-            )
+                torch._dynamo.graph_break()
+                # Call last `n` blocks to further process the hidden states
+                # for higher precision.
+                hidden_states, encoder_hidden_states = self.call_Bn_blocks(
+                    hidden_states,
+                    encoder_hidden_states,
+                    *args,
+                    **kwargs,
+                )
+        else:
+            with self._nvtx_range("cache_dit:cache_miss"):
+                self.context_manager.set_Fn_buffer(
+                    Fn_hidden_states_residual,
+                    prefix=f"{self.cache_prefix}_Fn_residual",
+                )
+                if self.context_manager.is_l1_diff_enabled():
+                    # for hidden states L1 diff
+                    self.context_manager.set_Fn_buffer(
+                        hidden_states,
+                        f"{self.cache_prefix}_Fn_hidden_states",
+                    )
+                del Fn_hidden_states_residual
+                torch._dynamo.graph_break()
+                (
+                    hidden_states,
+                    encoder_hidden_states,
+                    hidden_states_residual,
+                    encoder_hidden_states_residual,
+                ) = self.call_Mn_blocks(  # middle
+                    hidden_states,
+                    encoder_hidden_states,
+                    *args,
+                    **kwargs,
+                )
+                torch._dynamo.graph_break()
+                if self.context_manager.is_cache_residual():
+                    self.context_manager.set_Bn_buffer(
+                        hidden_states_residual,
+                        prefix=f"{self.cache_prefix}_Bn_residual",
+                    )
+                else:
+                    self.context_manager.set_Bn_buffer(
+                        hidden_states,
+                        prefix=f"{self.cache_prefix}_Bn_hidden_states",
+                    )
+
+                if self.context_manager.is_encoder_cache_residual():
+                    self.context_manager.set_Bn_encoder_buffer(
+                        encoder_hidden_states_residual,
+                        prefix=f"{self.cache_prefix}_Bn_residual",
+                    )
+                else:
+                    self.context_manager.set_Bn_encoder_buffer(
+                        encoder_hidden_states,
+                        prefix=f"{self.cache_prefix}_Bn_hidden_states",
+                    )
+                torch._dynamo.graph_break()
+                # Call last `n` blocks to further process the hidden states
+                # for higher precision.
+                hidden_states, encoder_hidden_states = self.call_Bn_blocks(
+                    hidden_states,
+                    encoder_hidden_states,
+                    *args,
+                    **kwargs,
+                )
 
         # patch cached stats for blocks or remove it.
         torch._dynamo.graph_break()
