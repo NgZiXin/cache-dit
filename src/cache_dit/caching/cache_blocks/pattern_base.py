@@ -271,7 +271,7 @@ class CachedBlocks_Pattern_Base(torch.nn.Module):
 
         self.context_manager.mark_step_begin()
         # Residual L1 diff or Hidden States L1 diff
-        with self._nvtx_range("cache_dit:can_cache"):
+        with self._nvtx_range(f"can_cache:cache_dit:{self.cache_prefix}"):
             can_use_cache = self.context_manager.can_cache(
                 (
                     Fn_hidden_states_residual
@@ -288,7 +288,7 @@ class CachedBlocks_Pattern_Base(torch.nn.Module):
 
         torch._dynamo.graph_break()
         if can_use_cache:
-            with self._nvtx_range("cache_dit:cache_hit"):
+            with self._nvtx_range(f"cache_hit:cache_dit:{self.cache_prefix}"):
                 self.context_manager.add_cached_step()
                 del Fn_hidden_states_residual
                 hidden_states, encoder_hidden_states = self.context_manager.apply_cache(
@@ -315,7 +315,7 @@ class CachedBlocks_Pattern_Base(torch.nn.Module):
                     **kwargs,
                 )
         else:
-            with self._nvtx_range("cache_dit:cache_miss"):
+            with self._nvtx_range(f"cache_miss:cache_dit:{self.cache_prefix}"):
                 self.context_manager.set_Fn_buffer(
                     Fn_hidden_states_residual,
                     prefix=f"{self.cache_prefix}_Fn_residual",
