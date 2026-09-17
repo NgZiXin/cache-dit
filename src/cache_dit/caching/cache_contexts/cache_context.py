@@ -72,6 +72,7 @@ class CachedContext:
     cfg_accumulated_residual_diff: float = 0.0
     cfg_continuous_cached_steps: int = 0
     cfg_accumulated_cached_steps: int = 0
+    last_cache_decision_reason: str = "not_evaluated"
 
     def __post_init__(self):
         if logger.isEnabledFor(logging.DEBUG):
@@ -281,6 +282,12 @@ class CachedContext:
 
     def get_cfg_accumulated_cached_steps(self):
         return self.cfg_accumulated_cached_steps
+
+    def set_last_cache_decision_reason(self, reason: str):
+        self.last_cache_decision_reason = reason
+
+    def get_last_cache_decision_reason(self) -> str:
+        return self.last_cache_decision_reason
 
     def get_current_step(self):
         return self.executed_steps - 1
