@@ -915,13 +915,13 @@ class CachedContextManager:
         else:
             continuous_cached_steps = self.get_cfg_continuous_cached_steps()
 
-    if max_continuous_cached_steps >= 0 and (continuous_cached_steps
-                                             >= max_continuous_cached_steps):
-      if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"{prefix}, max_continuous_cached_steps "
-                     f"reached: {max_continuous_cached_steps}, "
-                     "can not use cache.")
-      return False
+        if max_continuous_cached_steps >= 0 and (continuous_cached_steps
+                                                >= max_continuous_cached_steps):
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"{prefix}, max_continuous_cached_steps "
+                            f"reached: {max_continuous_cached_steps}, "
+                            "can not use cache.")
+            return False
 
         # max accumulated residual diff threshold
         max_accumulated_residual_diff_threshold = self.max_accumulated_residual_diff_threshold()
