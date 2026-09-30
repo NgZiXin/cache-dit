@@ -570,7 +570,7 @@ class CachedContextManager:
         # the threshold is always enabled, -2.0 means the shape is not matched.
         if threshold <= 0.0:
             self.add_residual_diff(-0.0)
-            return False
+            return self._cache_decision(self._cache_decision(False, "threshold_disabled", prefix, threshold=threshold), "threshold_disabled")
 
         if threshold >= 1.0:
             # If threshold is 1.0 or more, we consider them always similar.
