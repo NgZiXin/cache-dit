@@ -262,10 +262,21 @@ class CachedContextManager:
         return cached_context.get_last_cache_decision_reason()
 
     @torch.compiler.disable
-    def _cache_decision(self, can_cache: bool, reason: str) -> bool:
+    def _cache_decision(
+        self,
+        can_cache: bool,
+        reason: str,
+        prefix: str,
+        diff: Optional[float] = None,
+        threshold: Optional[float] = None,
+    ) -> bool:
         cached_context = self.get_context()
         assert cached_context is not None, "cached_context must be set before"
         cached_context.set_last_cache_decision_reason(reason)
+        if os.environ.get("CACHE_DIT_DECISION_CSV") and not (
+            dist.is_available() and dist.is_initialized() and dist.get_rank() != 0
+        ):
+            log_cache_decision(cached_context, prefix, can_cache, reason, diff, threshold)
         return can_cache
 
     @torch.compiler.disable
@@ -549,14 +560,6 @@ class CachedContextManager:
         return cached_context.cache_config.cfg_diff_compute_separate
 
     @torch.compiler.disable
-    def _cache_decision(self, can_cache, reason, prefix, diff=None, threshold=None):
-        if os.environ.get("CACHE_DIT_DECISION_CSV") and not (
-            dist.is_available() and dist.is_initialized() and dist.get_rank() != 0
-        ):
-            log_cache_decision(self.get_context(), prefix, can_cache, reason, diff, threshold)
-        return can_cache
-
-    @torch.compiler.disable
     def similarity(
         self,
         t1: torch.Tensor,  # prev residual R(t-1,n) = H(t-1,n) - H(t-1,0)
@@ -570,18 +573,18 @@ class CachedContextManager:
         # the threshold is always enabled, -2.0 means the shape is not matched.
         if threshold <= 0.0:
             self.add_residual_diff(-0.0)
-            return self._cache_decision(self._cache_decision(False, "threshold_disabled", prefix, threshold=threshold), "threshold_disabled")
+            return self._cache_decision(False, "threshold_disabled", prefix, threshold=threshold)
 
         if threshold >= 1.0:
             # If threshold is 1.0 or more, we consider them always similar.
             self.add_residual_diff(-1.0)
-            return self._cache_decision(self._cache_decision(True, "always_similar", prefix, threshold=threshold), "always_similar")
+            return self._cache_decision(True, "always_similar", prefix, threshold=threshold)
 
         if t1.shape != t2.shape:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"{prefix}, shape error: {t1.shape} != {t2.shape}")
             self.add_residual_diff(-2.0)
-            return self._cache_decision(self._cache_decision(False, "shape_mismatch", prefix, threshold=threshold), "shape_mismatch")
+            return self._cache_decision(False, "shape_mismatch", prefix, threshold=threshold)
 
         if all(
             (
@@ -897,15 +900,15 @@ class CachedContextManager:
     ) -> bool:
 
         if self.is_in_warmup():
-            return self._cache_decision(self._cache_decision(False, "warmup", prefix), "warmup")
+            return self._cache_decision(False, "warmup", prefix)
 
         # if enabled steps_computation_mask w/ dyanamic cache
         if self.is_steps_computation_mask_enabled():
             if self.is_in_full_compute_steps():
-                return self._cache_decision(self._cache_decision(False, "full_compute_step", prefix), "full_compute_step")
+                return self._cache_decision(False, "full_compute_step", prefix)
             else:  # In cache steps, dynaimic/static cache allowed
                 if self.get_steps_computation_policy() == "static":
-                    return self._cache_decision(self._cache_decision(True, "static_policy_hit", prefix), "static_policy_hit")
+                    return self._cache_decision(True, "static_policy_hit", prefix)
 
         # max cached steps
         max_cached_steps = self.get_max_cached_steps()
@@ -919,7 +922,7 @@ class CachedContextManager:
                 logger.debug(
                     f"{prefix}, max_cached_steps reached: {max_cached_steps}, " "can not use cache."
                 )
-            return self._cache_decision(self._cache_decision(False, "max_cached_steps", prefix), "max_cached_steps")
+            return self._cache_decision(False, "max_cached_steps", prefix)
 
         # max continuous cached steps
         max_continuous_cached_steps = self.get_max_continuous_cached_steps()
@@ -954,12 +957,12 @@ class CachedContextManager:
                         f"accumulated_residual_diff: {accumulated_residual_diff:.6f}, "
                         "can not use cache."
                     )
-                return self._cache_decision(self._cache_decision(False, "max_accumulated_residual_diff", prefix), "max_accumulated_residual_diff")
+                return self._cache_decision(False, "max_accumulated_residual_diff", prefix)
 
         if threshold is None or threshold <= 0.0:
             threshold = self.get_residual_diff_threshold()
         if threshold <= 0.0:
-            return self._cache_decision(self._cache_decision(False, "threshold_disabled", prefix, threshold=threshold), "threshold_disabled")
+            return self._cache_decision(False, "threshold_disabled", prefix, threshold=threshold)
 
         downsample_factor = self.get_downsample_factor()
         if downsample_factor > 1 and "Bn" not in prefix:
@@ -974,9 +977,6 @@ class CachedContextManager:
 
         if prev_states_tensor is None:
             return self._cache_decision(False, "no_previous_buffer", prefix, threshold=threshold)
-
-        if prev_states_tensor is None:
-            return self._cache_decision(False, "no_previous_buffer")
 
         # Dynamic cache according to the residual diff
         return self.similarity(
