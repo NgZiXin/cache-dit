@@ -184,37 +184,37 @@ class CachedContext:
                 if cfg_encoder_calibrator is not None:
                     cfg_encoder_calibrator.reset_cache()
 
-    # A compute step breaks the cache streak
-    previous_step = self.get_current_step() - 1
-    if not self.is_separate_cfg_step():
-      if not self.cached_steps or self.cached_steps[-1] != previous_step:
-        self.continuous_cached_steps = 0
-    else:
-      if not self.cfg_cached_steps or self.cfg_cached_steps[-1] != previous_step:
-        self.cfg_continuous_cached_steps = 0
-
-    # mark_step_begin of calibrator must be called after the cache is reset.
-    if self.has_calibrators():
-      if self.cache_config.enable_separate_cfg:
-        # Assume non-CFG steps: 0, 2, 4, 6, ...
+        # A compute step breaks the cache streak
+        previous_step = self.get_current_step() - 1
         if not self.is_separate_cfg_step():
-          calibrator, encoder_calibrator = self.get_calibrators()
-          if calibrator is not None:
-            calibrator.mark_step_begin()
-          if encoder_calibrator is not None:
-            encoder_calibrator.mark_step_begin()
+            if not self.cached_steps or self.cached_steps[-1] != previous_step:
+                self.continuous_cached_steps = 0
         else:
-          cfg_calibrator, cfg_encoder_calibrator = self.get_cfg_calibrators()
-          if cfg_calibrator is not None:
-            cfg_calibrator.mark_step_begin()
-          if cfg_encoder_calibrator is not None:
-            cfg_encoder_calibrator.mark_step_begin()
-      else:
-        calibrator, encoder_calibrator = self.get_calibrators()
-        if calibrator is not None:
-          calibrator.mark_step_begin()
-        if encoder_calibrator is not None:
-          encoder_calibrator.mark_step_begin()
+            if not self.cfg_cached_steps or self.cfg_cached_steps[-1] != previous_step:
+                self.cfg_continuous_cached_steps = 0
+
+        # mark_step_begin of calibrator must be called after the cache is reset.
+        if self.has_calibrators():
+            if self.cache_config.enable_separate_cfg:
+                # Assume non-CFG steps: 0, 2, 4, 6, ...
+                if not self.is_separate_cfg_step():
+                    calibrator, encoder_calibrator = self.get_calibrators()
+                    if calibrator is not None:
+                        calibrator.mark_step_begin()
+                    if encoder_calibrator is not None:
+                        encoder_calibrator.mark_step_begin()
+            else:
+                cfg_calibrator, cfg_encoder_calibrator = self.get_cfg_calibrators()
+                if cfg_calibrator is not None:
+                    cfg_calibrator.mark_step_begin()
+                if cfg_encoder_calibrator is not None:
+                    cfg_encoder_calibrator.mark_step_begin()
+        else:
+            calibrator, encoder_calibrator = self.get_calibrators()
+            if calibrator is not None:
+                calibrator.mark_step_begin()
+            if encoder_calibrator is not None:
+                encoder_calibrator.mark_step_begin()
 
     def get_calibrators(self) -> Tuple[CalibratorBase, CalibratorBase]:
         return self.calibrator, self.encoder_calibrator
