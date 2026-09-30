@@ -251,15 +251,15 @@ class CachedContext:
     def get_cfg_accumulated_residual_diff(self):
         return self.cfg_accumulated_residual_diff
 
-  def add_cached_step(self):
-    curr_cached_step = self.get_current_step()
-    if not self.is_separate_cfg_step():
-      self.continuous_cached_steps += 1
+    def add_cached_step(self):
+        curr_cached_step = self.get_current_step()
+        if not self.is_separate_cfg_step():
+            self.continuous_cached_steps += 1
 
-      self.cached_steps.append(curr_cached_step)
-      self.accumulated_cached_steps += 1
-    else:
-      self.cfg_continuous_cached_steps += 1
+            self.cached_steps.append(curr_cached_step)
+            self.accumulated_cached_steps += 1
+        else:
+            self.cfg_continuous_cached_steps += 1
 
             self.cfg_cached_steps.append(curr_cached_step)
             self.cfg_accumulated_cached_steps += 1
