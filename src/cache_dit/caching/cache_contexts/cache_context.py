@@ -72,6 +72,7 @@ class CachedContext:
     cfg_accumulated_residual_diff: float = 0.0
     cfg_continuous_cached_steps: int = 0
     cfg_accumulated_cached_steps: int = 0
+    last_cache_decision_reason: str = "not_evaluated"
 
     def __post_init__(self):
         if logger.isEnabledFor(logging.DEBUG):
@@ -183,6 +184,15 @@ class CachedContext:
                 if cfg_encoder_calibrator is not None:
                     cfg_encoder_calibrator.reset_cache()
 
+        # A compute step breaks the cache streak
+        previous_step = self.get_current_step() - 1
+        if not self.is_separate_cfg_step():
+            if not self.cached_steps or self.cached_steps[-1] != previous_step:
+                self.continuous_cached_steps = 0
+        else:
+            if not self.cfg_cached_steps or self.cfg_cached_steps[-1] != previous_step:
+                self.cfg_continuous_cached_steps = 0
+
         # mark_step_begin of calibrator must be called after the cache is reset.
         if self.has_calibrators():
             if self.cache_config.enable_separate_cfg:
@@ -193,18 +203,18 @@ class CachedContext:
                         calibrator.mark_step_begin()
                     if encoder_calibrator is not None:
                         encoder_calibrator.mark_step_begin()
-                else:
-                    cfg_calibrator, cfg_encoder_calibrator = self.get_cfg_calibrators()
-                    if cfg_calibrator is not None:
-                        cfg_calibrator.mark_step_begin()
-                    if cfg_encoder_calibrator is not None:
-                        cfg_encoder_calibrator.mark_step_begin()
             else:
-                calibrator, encoder_calibrator = self.get_calibrators()
-                if calibrator is not None:
-                    calibrator.mark_step_begin()
-                if encoder_calibrator is not None:
-                    encoder_calibrator.mark_step_begin()
+                cfg_calibrator, cfg_encoder_calibrator = self.get_cfg_calibrators()
+                if cfg_calibrator is not None:
+                    cfg_calibrator.mark_step_begin()
+                if cfg_encoder_calibrator is not None:
+                    cfg_encoder_calibrator.mark_step_begin()
+        else:
+            calibrator, encoder_calibrator = self.get_calibrators()
+            if calibrator is not None:
+                calibrator.mark_step_begin()
+            if encoder_calibrator is not None:
+                encoder_calibrator.mark_step_begin()
 
     def get_calibrators(self) -> Tuple[CalibratorBase, CalibratorBase]:
         return self.calibrator, self.encoder_calibrator
@@ -244,28 +254,12 @@ class CachedContext:
     def add_cached_step(self):
         curr_cached_step = self.get_current_step()
         if not self.is_separate_cfg_step():
-            if self.cached_steps:
-                prev_cached_step = self.cached_steps[-1]
-                if curr_cached_step - prev_cached_step == 1:
-                    if self.continuous_cached_steps == 0:
-                        self.continuous_cached_steps += 2
-                    else:
-                        self.continuous_cached_steps += 1
-            else:
-                self.continuous_cached_steps += 1
+            self.continuous_cached_steps += 1
 
             self.cached_steps.append(curr_cached_step)
             self.accumulated_cached_steps += 1
         else:
-            if self.cfg_cached_steps:
-                prev_cfg_cached_step = self.cfg_cached_steps[-1]
-                if curr_cached_step - prev_cfg_cached_step == 1:
-                    if self.cfg_continuous_cached_steps == 0:
-                        self.cfg_continuous_cached_steps += 2
-                    else:
-                        self.cfg_continuous_cached_steps += 1
-            else:
-                self.cfg_continuous_cached_steps += 1
+            self.cfg_continuous_cached_steps += 1
 
             self.cfg_cached_steps.append(curr_cached_step)
             self.cfg_accumulated_cached_steps += 1
@@ -281,6 +275,12 @@ class CachedContext:
 
     def get_cfg_accumulated_cached_steps(self):
         return self.cfg_accumulated_cached_steps
+
+    def set_last_cache_decision_reason(self, reason: str):
+        self.last_cache_decision_reason = reason
+
+    def get_last_cache_decision_reason(self) -> str:
+        return self.last_cache_decision_reason
 
     def get_current_step(self):
         return self.executed_steps - 1
