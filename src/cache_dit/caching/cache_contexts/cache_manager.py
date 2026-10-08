@@ -573,6 +573,7 @@ class CachedContextManager:
             self.add_residual_diff(-2.0)
             return self._cache_decision(False, "shape_mismatch")
 
+        mean_diff = None
         if all(
             (
                 self.enable_separate_cfg(),
@@ -618,7 +619,11 @@ class CachedContextManager:
             diff = (mean_diff / mean_t1).item()
 
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"{prefix}, diff: {diff:.6f}, threshold: {threshold:.6f}")
+            abs_diff = f"{mean_diff.item():.6f}" if mean_diff is not None else "N/A"
+            logger.debug(
+                f"{prefix}, diff: {diff:.6f}, threshold: {threshold:.6f}, "
+                f"abs_diff: {abs_diff}"
+            )
 
         self.add_residual_diff(diff)
 
